@@ -1,0 +1,143 @@
+<?xml version="1.0"?>
+<SqlWorkbenchSqlProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="InVoice3">
+  <Items>
+    <LogicalFolder Name="Connections" Type="2" Sorted="true">
+      <Items>
+        <ConnectionNode Name="MIRZAKHANI\SQL2022:METRA\a.turelli">
+          <Created>2022-08-05T09:24:06.5606517+02:00</Created>
+          <Type>SQL</Type>
+          <Server>MIRZAKHANI\SQL2022</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB />
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Queries" Type="0" Sorted="true">
+      <Items>
+        <FileNode Name="_InVoice3_misc.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>_InVoice3_misc.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_03.01_dbo.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_03.01_dbo.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_03.02_FXML_tables.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_03.02_FXML_tables.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_03.03_FXML_views.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_03.03_FXML_views.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_05.02_FXML_system_Programmability.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:MIRZAKHANI\SQL2022:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>MIRZAKHANI\SQL2022</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_05.02_FXML_system_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_05.02_FXML_user_Programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_05.02_FXML_user_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_11.01_migrazione_pre_sql_source_control.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_11.01_migrazione_pre_sql_source_control.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_11.02_migrazione_post_sql_source_control.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_11.02_migrazione_post_sql_source_control.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Passivo_00.00_modifiche.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>Passivo_00.00_modifiche.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Passivo_01.01_FXML.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>Passivo_01.01_FXML.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Passivo_05.02_system_programmability.sql.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>Passivo_05.02_system_programmability.sql.sql</FullPath>
+        </FileNode>
+        <FileNode Name="Passivo_05.02_user_programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>Passivo_05.02_user_programmability.sql</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Miscellaneous" Type="3" Sorted="true">
+      <Items>
+        <FileNode Name="InVoice3_1_0_0_56.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_56.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_1_0_0_57.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_57.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_1_0_0_59.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_59.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_1_0_0_61.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_61.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_1_0_0_64.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_64.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_1_0_0_67.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_67.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoice3_1_0_0_69.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoice3_1_0_0_69.txt</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+  </Items>
+</SqlWorkbenchSqlProject>

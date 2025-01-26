@@ -1,0 +1,1522 @@
+ALTER PROCEDURE FXML.ssp_ImportaXMLPassivo_Documenti_Righe (
+    @PKImportXML BIGINT,
+    @IDDocumento UNIQUEIDENTIFIER
+)
+AS
+BEGIN
+
+SET NOCOUNT ON;
+
+DECLARE @XML XML;
+
+SELECT TOP 1 @XML = XMLContent
+FROM FXML.ImportXML
+WHERE PKImportXML = @PKImportXML;
+
+SELECT
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('NumeroLinea').value('.', 'INT') AS NumeroLinea,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceTipo').value('.', 'NVARCHAR(35)') AS CodiceArticolo_CodiceTipo,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceValore').value('.', 'NVARCHAR(35)') AS CodiceArticolo_CodiceValore,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Descrizione').value('.', 'NVARCHAR(1000)') AS Descrizione,
+    --FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Quantita').value('.', N'DECIMAL(20, 5)') AS Quantita,
+	FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Quantita').value('.', N'NVARCHAR(21)') AS Quantita,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('UnitaMisura').value('.', N'NVARCHAR(10)') AS UnitaMisura,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('PrezzoUnitario').value('.', N'DECIMAL(20, 5)') AS PrezzoUnitario,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('PrezzoTotale').value('.', N'DECIMAL(20, 5)') AS PrezzoTotale,
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('AliquotaIVA').value('.', N'DECIMAL(5, 2)') AS AliquotaIVA
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody/DatiBeniServizi/DettaglioLinee') AS FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+/*** Check preventivi: Inizio ***/
+
+PRINT 'Codici iva';
+
+DECLARE @SDI_MaxProgr INT;
+
+SELECT @SDI_MaxProgr = MAX(TRY_CAST(SUBSTRING(CI.ID, 4, LEN(CI.ID)) AS INT))
+FROM dbo.CodiciIva CI
+WHERE CI.ID LIKE N'SDI%';
+
+WITH TrascodificaAliquotaIVA
+AS (
+    SELECT
+        Perc AS AliquotaIVA,
+        COALESCE(SDI_Natura, '') AS SDI_Natura,
+        ID AS CodIva,
+        ROW_NUMBER() OVER (PARTITION BY Perc, COALESCE(SDI_Natura, '') ORDER BY ID) AS rn
+
+    FROM dbo.CodiciIva
+),
+AliquotaNatura
+AS (
+    SELECT DISTINCT
+        FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('AliquotaIVA').value('.', N'DECIMAL(5, 2)') AS AliquotaIVA,
+        COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Natura').value('.', N'CHAR(2)'), '') AS SDI_Natura
+
+    FROM FXML.ImportXML IXML
+    CROSS APPLY @XML.nodes('//FatturaElettronicaBody/DatiBeniServizi/DettaglioLinee') AS FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee (XML)
+    LEFT JOIN TrascodificaAliquotaIVA TAIVA ON TAIVA.AliquotaIVA = FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('AliquotaIVA').value('.', N'DECIMAL(5, 2)') AND TAIVA.SDI_Natura = COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Natura').value('.', N'CHAR(2)'), '')
+        AND TAIVA.rn = 1
+    WHERE IXML.PKImportXML = @PKImportXML
+        AND TAIVA.CodIva IS NULL
+)
+INSERT INTO dbo.CodiciIva
+(
+    ID,
+    Descrizione,
+    Perc,
+    ImpEsigibile,
+    IvaEsigibile,
+    EsenzionePlafond,
+    SDI_Natura,
+    SDI_RiferimentoNormativo,
+    SDI_EsigibilitaIVA,
+    IsSoggettoBollo
+)
+SELECT
+    'SDI' + RIGHT('000' + CONVERT(VARCHAR(3), COALESCE(@SDI_MaxProgr, 0) + ROW_NUMBER() OVER (ORDER BY AN.AliquotaIVA, AN.SDI_Natura)), 3),
+    'Importato da SDI',
+    AN.AliquotaIVA,
+    CAST(1 AS BIT),
+    CAST(1 AS BIT),
+    CAST(0 AS BIT),
+    AN.SDI_Natura,
+    NULL,
+    'I',
+    CAST(0 AS BIT)
+
+FROM AliquotaNatura AN;
+
+/*** Check preventivi: Fine ***/
+
+PRINT 'Pre insert Documenti_Righe';
+
+WITH TrascodificaAliquotaIVA
+AS (
+    SELECT
+        Perc AS AliquotaIVA,
+        COALESCE(SDI_Natura, '') AS SDI_Natura,
+        ID AS CodIva,
+        ROW_NUMBER() OVER (PARTITION BY Perc, COALESCE(SDI_Natura, '') ORDER BY ID) AS rn
+
+    FROM dbo.CodiciIva
+)
+INSERT INTO dbo.Documenti_Righe
+(
+    ID,
+    IDDocumento,
+    IDArticolo,
+    IDFamiglia,
+    IDUnitaMisura,
+    IDDocumento_Origine,
+    IDDocumento_RigaOrigine,
+    IDStato,
+    Posizione,
+    Qta,
+    QtaEvasa,
+    Codice,
+    Descrizione1,
+    Descrizione2,
+    Descrizione3,
+    Descrizione4,
+    ImpUnitario,
+    ImpNetto,
+    Sconto,
+    ImpSconto,
+    ImpUnitarioScontato,
+    ImpNettoScontato,
+    CodIva,
+    ImpIva,
+    ImpLordo,
+    NoteRiga,
+    Lock_Delete,
+    Lock_Qta,
+    Lock_Codice,
+    Lock_Descrizione1,
+    Lock_Descrizione2,
+    Lock_Descrizione3,
+    Lock_Descrizione4,
+    Nascondi,
+    DisegnoNumero,
+    CommessaNumero,
+    CommessaDataConsegna,
+    IDPreventivoPrevio,
+    DdtEntrataNumero,
+    DdtEntrataData,
+    OrdCliNumero,
+    OrdCliData,
+    SDI_NumeroLinea,
+	CodiceEsterno,
+	CodiceEsternoTipo
+)
+SELECT
+    NEWID(),      -- ID - uniqueidentifier
+    @IDDocumento,      -- IDDocumento - uniqueidentifier
+    COALESCE(TFA.IDArticolo, NULL),      -- IDArticolo - uniqueidentifier
+    NULL,       -- IDFamiglia - nvarchar(50)
+    NULL,       -- IDUnitaMisura - nvarchar(5)
+    NULL,      -- IDDocumento_Origine - uniqueidentifier
+    NULL,      -- IDDocumento_RigaOrigine - uniqueidentifier
+    NULL,       -- IDStato - nvarchar(10)
+    --MP 24/11/2020: Aggiunta posizione
+    --ERA: NULL,         -- Posizione - int
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('NumeroLinea').value('.', 'INT'),          -- Posizione - int
+    --FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Quantita').value('.', N'DECIMAL(20, 5)'),      -- Qta - numeric(19, 6)
+	CASE 
+		WHEN FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Quantita').value('.', N'NVARCHAR(21)') = '' 
+		THEN 0.0
+		ELSE FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Quantita').value('.', N'DECIMAL(20, 5)') 
+		END
+	AS Quantita,
+    NULL,      -- QtaEvasa - numeric(19, 6)
+
+    NULL,       -- Codice - nvarchar(50)
+    --CASE WHEN COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceTipo').value('.', 'NVARCHAR(35)'), N'') = N'' THEN N'' ELSE FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceTipo').value('.', 'NVARCHAR(35)') + N'.' END
+    --+ COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceValore').value('.', 'NVARCHAR(35)'), N''),-- Codice - nvarchar(50)
+
+    --NULL,       -- Descrizione1 - nvarchar(1000)
+    COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Descrizione').value('.', 'NVARCHAR(1000)'), N''),       -- Descrizione1 - nvarchar(1000)
+
+    NULL,       -- Descrizione2 - nvarchar(255)
+    NULL,       -- Descrizione3 - nvarchar(255)
+    NULL,       -- Descrizione4 - nvarchar(255)
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('PrezzoUnitario').value('.', N'DECIMAL(20, 5)'),      -- ImpUnitario - numeric(19, 6)
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('PrezzoTotale').value('.', N'DECIMAL(20, 5)'),      -- ImpNetto - numeric(19, 6)
+    NULL,       -- Sconto - nvarchar(20)
+    NULL,      -- ImpSconto - numeric(19, 6)
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('PrezzoUnitario').value('.', N'DECIMAL(20, 5)'),      -- ImpUnitarioScontato - numeric(19, 6)
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('PrezzoTotale').value('.', N'DECIMAL(20, 5)'),      -- ImpNettoScontato - numeric(19, 6)
+
+    COALESCE(TAIVA.CodIva, N'> TODO <'),       -- CodIva - nvarchar(10)
+    --NULL,       -- CodIva - nvarchar(10)
+
+    NULL,      -- ImpIva - numeric(19, 6)
+    NULL,      -- ImpLordo - numeric(19, 6)
+    NULL,       -- NoteRiga - nvarchar(2500)
+    NULL,      -- Lock_Delete - bit
+    NULL,      -- Lock_Qta - bit
+    NULL,      -- Lock_Codice - bit
+    NULL,      -- Lock_Descrizione1 - bit
+    NULL,      -- Lock_Descrizione2 - bit
+    NULL,      -- Lock_Descrizione3 - bit
+    NULL,      -- Lock_Descrizione4 - bit
+    NULL,      -- Nascondi - bit
+    NULL,       -- DisegnoNumero - nvarchar(20)
+    NULL,       -- CommessaNumero - nvarchar(20)
+    NULL, -- CommessaDataConsegna - datetime
+    NULL,      -- IDPreventivoPrevio - uniqueidentifier
+    NULL,       -- DdtEntrataNumero - nvarchar(20)
+    NULL, -- DdtEntrataData - datetime
+    NULL,       -- OrdCliNumero - nvarchar(20)
+    NULL, -- OrdCliData - datetime
+    FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('NumeroLinea').value('.', 'INT'),          -- SDI_NumeroLinea - int
+    COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceValore').value('.', 'NVARCHAR(35)'), N''), -- CodiceEsterno - nvarchar(50)
+	CASE WHEN COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceTipo').value('.', 'NVARCHAR(35)'), N'') = N'' THEN N'' ELSE FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceTipo').value('.', 'NVARCHAR(35)') END -- CodiceEsternoTipo - NVARCHAR(50)
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody/DatiBeniServizi/DettaglioLinee') AS FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee (XML)
+INNER JOIN dbo.Documenti D ON D.ID = @IDDocumento
+LEFT JOIN FXML.TrascodificaFornitoreArticolo TFA ON TFA.IDFornitore = D.IDCliFor AND TFA.CodiceValore = FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('CodiceArticolo/CodiceValore').value('.', 'NVARCHAR(35)')
+LEFT JOIN TrascodificaAliquotaIVA TAIVA ON TAIVA.AliquotaIVA = FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('AliquotaIVA').value('.', N'DECIMAL(5, 2)') AND TAIVA.SDI_Natura = COALESCE(FatturaElettronicaBody_DatiBeniServizi_DettaglioLinee.XML.query('Natura').value('.', N'CHAR(2)'), '')
+    AND TAIVA.rn = 1
+WHERE IXML.PKImportXML = @PKImportXML;
+
+--Controllo codici
+
+PRINT 'Codici articoli';
+
+UPDATE
+	DR
+SET	
+	DR.IDArticolo = A.ID,
+	DR.Codice = A.Codice
+FROM	
+	dbo.Documenti_Righe DR 
+	INNER JOIN dbo.Articoli A 
+		ON A.Codice = DR.CodiceEsterno
+WHERE DR.IDDocumento=@idDocumento
+	AND COALESCE(DR.Codice,'') = '' AND DR.CodiceEsterno <> ''
+
+--Controllo codici esterni
+
+PRINT 'Codici esterni';
+
+UPDATE
+	DR
+SET	
+	DR.IDArticolo = A.ID,
+	DR.Codice = A.Codice
+FROM	
+	dbo.Documenti D
+	INNER JOIN dbo.Documenti_Righe DR 
+		ON DR.IDDocumento = D.ID
+	INNER JOIN dbo.Articoli_CodiciEsterni ACE 
+		ON ACE.IDCliFor = D.IDCliFor
+		AND ACE.CodiceEsterno = DR.CodiceEsterno
+	INNER JOIN dbo.Articoli A 
+		ON A.ID = ACE.IDArticolo
+WHERE DR.IDDocumento=@idDocumento
+	AND COALESCE(DR.Codice,'') = '' AND DR.CodiceEsterno <> ''
+
+PRINT 'Post insert Documenti_Righe';
+
+END;
+GO
+
+ALTER PROCEDURE FXML.ssp_ImportaXMLPassivo_Documenti_Scadenze (
+    @PKImportXML BIGINT,
+    @IDDocumento UNIQUEIDENTIFIER
+)
+AS
+BEGIN
+
+SET NOCOUNT ON;
+
+DECLARE @XML XML;
+
+SELECT TOP 1 @XML = XMLContent
+FROM FXML.ImportXML
+WHERE PKImportXML = @PKImportXML;
+
+SELECT
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('ModalitaPagamento').value('.', 'CHAR(4)') AS ModalitaPagamento,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('DataScadenzaPagamento').value('.', 'DATE') AS DataScadenzaPagamento,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('ImportoPagamento').value('.', 'DECIMAL(15, 2)') AS ImportoPagamento,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('IstitutoFinanziario').value('.', 'NVARCHAR(80)') AS IstitutoFinanziario,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('IBAN').value('.', N'NVARCHAR(34)') AS IBAN,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('ABI').value('.', N'INT') AS ABI,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('CAB').value('.', N'INT') AS CAB,
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('BIC').value('.', N'NVARCHAR(11)') AS BIC
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody/DatiPagamento/DettaglioPagamento') AS FatturaElettronicaBody_DatiPagamento_DettaglioPagamento (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+/*** Check preventivi: Inizio ***/
+
+/*** Check preventivi: Fine ***/
+
+PRINT 'Pre insert Documenti_Scadenze';
+
+WITH TrascodificaModalitaPagamento
+AS (
+    SELECT
+        MPT.SDI_ModalitaPagamento,
+        MPT.ID AS IDTipoPagamento,
+        ROW_NUMBER() OVER (PARTITION BY MPT.SDI_ModalitaPagamento ORDER BY CASE WHEN MPT.ID = COALESCE(MPT.SDI_ModalitaPagamento, '') THEN 0 ELSE 1 END, MPT.ID) AS rn
+
+    FROM dbo.ModalitaPagamento_Tipi MPT
+    WHERE COALESCE(MPT.SDI_ModalitaPagamento, '') <> ''
+)
+INSERT INTO dbo.Documenti_Scadenze
+(
+    ID,
+    IDDocumento,
+    BancaCassa,
+    Insoluto,
+    RbEsportata,
+    RbEsportataData,
+    RbBanca,
+    Descrizione,
+    Note,
+    Data,
+    Numero,
+    Tipo,
+    Importo,
+    IDTipoPagamento
+)
+SELECT
+    NEWID(),      -- ID - uniqueidentifier
+    @IDDocumento,      -- IDDocumento - uniqueidentifier
+    NULL,       -- BancaCassa - nvarchar(5)
+    NULL,      -- Insoluto - bit
+    NULL,      -- RbEsportata - bit
+    NULL, -- RbEsportataData - datetime
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('IstitutoFinanziario').value('.', 'NVARCHAR(80)'),       -- RbBanca - nvarchar(50)
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('IstitutoFinanziario').value('.', 'NVARCHAR(80)'),       -- Descrizione - nvarchar(100)
+    NULL,       -- Note - nvarchar(100)
+    CASE WHEN FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('DataScadenzaPagamento').value('.', 'DATE') = CAST('19000101' AS DATE) THEN CAST(D.Data AS DATE) ELSE FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('DataScadenzaPagamento').value('.', 'DATE') END AS Data, -- Data - datetime
+    ROW_NUMBER() OVER (ORDER BY FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('DataScadenzaPagamento').value('.', 'DATE')),         -- Numero - int
+    1 AS Tipo,         -- Tipo - int
+    FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('ImportoPagamento').value('.', 'DECIMAL(15, 2)'),      -- Importo - numeric(19, 6)
+    COALESCE(TMP.IDTipoPagamento, N'')        -- IDTipoPagamento - nvarchar(4)
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody/DatiPagamento/DettaglioPagamento') AS FatturaElettronicaBody_DatiPagamento_DettaglioPagamento (XML)
+INNER JOIN dbo.Documenti D ON D.ID = @IDDocumento
+LEFT JOIN TrascodificaModalitaPagamento TMP ON TMP.SDI_ModalitaPagamento = FatturaElettronicaBody_DatiPagamento_DettaglioPagamento.XML.query('ModalitaPagamento').value('.', 'CHAR(4)')
+    AND TMP.rn = 1
+WHERE IXML.PKImportXML = @PKImportXML;
+
+IF (@@ROWCOUNT = 0)
+BEGIN
+
+    DECLARE @SDI_Passivo_ModalitaPagamentoTipoDefault CHAR(4) = NULL;
+
+    SELECT TOP 1 @SDI_Passivo_ModalitaPagamentoTipoDefault = CP.Valore
+    FROM dbo.Conf_Parametri CP
+    WHERE CP.ID = N'SDI_Passivo_ModalitaPagamentoTipoDefault';
+
+    IF (@SDI_Passivo_ModalitaPagamentoTipoDefault IS NULL) SET @SDI_Passivo_ModalitaPagamentoTipoDefault = N'MP01'; -- MP01: Contanti
+
+    WITH TrascodificaModalitaPagamento
+    AS (
+        SELECT
+            MPT.SDI_ModalitaPagamento,
+            MPT.ID AS IDTipoPagamento,
+            ROW_NUMBER() OVER (PARTITION BY MPT.SDI_ModalitaPagamento ORDER BY CASE WHEN MPT.ID = COALESCE(MPT.SDI_ModalitaPagamento, '') THEN 0 ELSE 1 END, MPT.ID) AS rn
+
+        FROM dbo.ModalitaPagamento_Tipi MPT
+        WHERE COALESCE(MPT.SDI_ModalitaPagamento, '') <> ''
+    )
+    INSERT INTO dbo.Documenti_Scadenze
+    (
+        ID,
+        IDDocumento,
+        BancaCassa,
+        Insoluto,
+        RbEsportata,
+        RbEsportataData,
+        RbBanca,
+        Descrizione,
+        Note,
+        Data,
+        Numero,
+        Tipo,
+        Importo,
+        IDTipoPagamento
+    )
+    SELECT
+        NEWID(),      -- ID - uniqueidentifier
+        @IDDocumento,      -- IDDocumento - uniqueidentifier
+        NULL,       -- BancaCassa - nvarchar(5)
+        NULL,      -- Insoluto - bit
+        NULL,      -- RbEsportata - bit
+        NULL, -- RbEsportataData - datetime
+        NULL,       -- RbBanca - nvarchar(50)
+        NULL,       -- Descrizione - nvarchar(100)
+        NULL,       -- Note - nvarchar(100)
+        CAST(D.Data AS DATE) AS Data, -- Data - datetime
+        1 AS Numero,         -- Numero - int
+        1 AS Tipo,         -- Tipo - int
+        D.TotDoc,      -- Importo - numeric(19, 6)
+        N''        -- IDTipoPagamento - nvarchar(4)
+
+    FROM FXML.ImportXML IXML
+    INNER JOIN dbo.Documenti D ON D.ID = @IDDocumento
+    LEFT JOIN TrascodificaModalitaPagamento TMP ON TMP.SDI_ModalitaPagamento = @SDI_Passivo_ModalitaPagamentoTipoDefault
+        AND TMP.rn = 1
+    WHERE IXML.PKImportXML = @PKImportXML;
+
+END;
+
+PRINT 'Post insert Documenti_Scadenze';
+
+END;
+GO
+
+ALTER PROCEDURE FXML.ssp_ImportaXMLPassivo_Documenti (
+    @PKImportXML BIGINT,
+    @IDDocumento UNIQUEIDENTIFIER OUTPUT
+)
+AS
+BEGIN
+
+SET NOCOUNT ON;
+
+DECLARE @XML XML;
+
+SELECT TOP 1 @XML = XMLContent
+FROM FXML.ImportXML
+WHERE PKImportXML = @PKImportXML;
+
+SELECT
+    FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdPaese').value('.', 'CHAR(2)') AS CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdPaese,
+    FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdCodice').value('.', 'NVARCHAR(28)') AS CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice,
+    FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/CodiceFiscale').value('.', 'NVARCHAR(16)') AS CedentePrestatore_DatiAnagrafici_CodiceFiscale
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaHeader') AS FatturaElettronicaHeader (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+SELECT
+    FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/TipoDocumento').value('.', 'CHAR(4)') AS DatiGenerali_DatiGeneraliDocumento_TipoDocumento,
+    FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Divisa').value('.', 'CHAR(3)') AS DatiGenerali_DatiGeneraliDocumento_Divisa,
+    FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Data').value('.', N'DATE') AS DatiGenerali_DatiGeneraliDocumento_Data,
+    FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Numero').value('.', N'NVARCHAR(20)') AS DatiGenerali_DatiGeneraliDocumento_Numero
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody') AS FatturaElettronicaBody (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+/*** Check preventivi: Inizio ***/
+
+DECLARE @XML_CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice NVARCHAR(28);
+DECLARE @XML_CedentePrestatore_DatiAnagrafici_CodiceFiscale NVARCHAR(16);
+DECLARE @XML_CedentePrestatore_Sede_Nazione CHAR(2);
+DECLARE @XML_DatiGenerali_DatiGeneraliDocumento_TipoDocumento CHAR(4);
+DECLARE @XML_DatiGenerali_DatiGeneraliDocumento_Data DATE;
+DECLARE @XML_DatiGenerali_DatiGeneraliDocumento_Numero NVARCHAR(20);
+
+DECLARE @IDCliFor UNIQUEIDENTIFIER;
+DECLARE @Nazione NVARCHAR(50);
+
+SELECT
+    @XML_CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice = FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdCodice').value('.', 'NVARCHAR(28)'),
+    @XML_CedentePrestatore_DatiAnagrafici_CodiceFiscale = FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/CodiceFiscale').value('.', 'NVARCHAR(16)'),
+    @XML_CedentePrestatore_Sede_Nazione = FatturaElettronicaHeader.XML.query('CedentePrestatore/Sede/Nazione').value('.', 'CHAR(2)')
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaHeader') AS FatturaElettronicaHeader (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+SELECT
+    @XML_DatiGenerali_DatiGeneraliDocumento_TipoDocumento = FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/TipoDocumento').value('.', 'CHAR(4)'),
+    @XML_DatiGenerali_DatiGeneraliDocumento_Data = FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Data').value('.', N'DATE'),
+    @XML_DatiGenerali_DatiGeneraliDocumento_Numero = FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Numero').value('.', N'NVARCHAR(20)')
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody') AS FatturaElettronicaBody (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+SELECT TOP 1
+    @IDCliFor = CF.ID
+FROM dbo.CliFor CF
+WHERE CF.Fornitore = CAST(1 AS BIT)
+    AND (
+        [PI] = @XML_CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice
+        --MP 24/11/2020: ERA: OR CF = @XML_CedentePrestatore_DatiAnagrafici_CodiceFiscale
+        OR (COALESCE(CF, '') <> '' AND CF = @XML_CedentePrestatore_DatiAnagrafici_CodiceFiscale)
+    );
+
+SELECT
+    @Nazione = N.Nazione
+
+FROM InVoiceXML.XMLCodifiche.Nazione N
+WHERE N.IDNazione = @XML_CedentePrestatore_Sede_Nazione;
+
+SELECT @Nazione = COALESCE(@Nazione, N'Italia');
+
+--MPI: 17/10/2019: Aggiungo nazione se non esiste : Begin
+INSERT INTO dbo.Nazioni
+(
+    ID,
+    SDI_IDNazione,
+    SDI_Esportazione,
+    BolloVirtuale
+)
+
+SELECT 
+	N.Nazione,
+	N.IDNazione,
+	0,
+	0
+FROM
+	inVoiceXml.XMLCodifiche.Nazione N
+WHERE NOT EXISTS (SELECT N2.SDI_IDNazione 
+				  FROM dbo.Nazioni N2 
+				  WHERE N2.SDI_IDNazione COLLATE Latin1_General_CI_AS = N.IDNazione COLLATE Latin1_General_CI_AS
+				  AND   N2.ID COLLATE Latin1_General_CI_AS = N.Nazione COLLATE Latin1_General_CI_AS)
+	AND N.IDNazione = @XML_CedentePrestatore_Sede_Nazione;
+--MPI: 17/10/2019: Aggiungo nazione se non esiste : End
+
+SELECT
+    @XML_CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice AS XML_CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice,
+    @XML_CedentePrestatore_DatiAnagrafici_CodiceFiscale AS XML_CedentePrestatore_DatiAnagrafici_CodiceFiscale,
+    @IDCliFor AS IDCliFor,
+    @Nazione AS Nazione;
+
+DECLARE @XML_TipoDocumento CHAR(4);
+DECLARE @IDTipoDocumento NVARCHAR(20);
+DECLARE @ModelloReport NVARCHAR(50);
+
+SELECT
+    @XML_TipoDocumento = FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/TipoDocumento').value('.', 'CHAR(4)')
+
+FROM FXML.ImportXML IXML
+CROSS APPLY @XML.nodes('//FatturaElettronicaBody') AS FatturaElettronicaBody (XML)
+WHERE IXML.PKImportXML = @PKImportXML;
+
+-- #071 Richieste di modifica/integrazione - 28/11/2020 - BEGIN
+/* Era:
+SELECT TOP 1
+    @IDTipoDocumento = DT.ID,
+	@ModelloReport = DT.ModelloReport
+
+FROM dbo.Documenti_Tipi DT
+WHERE DT.SDI_TipoDocumentoPassivo = @XML_TipoDocumento;
+*/
+
+SELECT TOP 1
+    @IDTipoDocumento = IDTipoDocumento_InVoice
+
+FROM FXML.TipiDocumentoIngresso
+WHERE IDTipoDocumento_SDI = @XML_TipoDocumento
+ORDER BY IDTipoDocumento_InVoice;
+
+IF @IDTipoDocumento IS NOT NULL
+BEGIN
+
+SELECT TOP 1
+    @ModelloReport = DT.ModelloReport
+
+FROM dbo.Documenti_Tipi DT
+WHERE DT.ID = @IDTipoDocumento
+ORDER BY DT.ID;
+
+END;
+
+IF @IDTipoDocumento IS NULL
+BEGIN
+
+    UPDATE FXML.ImportXML
+    SET IDStatoImportazione = 99 -- 99: importazione terminata con errori
+    WHERE PKImportXML = @PKImportXML;
+
+    SET @IDDocumento = NULL;
+
+END;
+ELSE
+BEGIN
+
+-- #071 Richieste di modifica/integrazione - 28/11/2020 - END
+
+SELECT
+    @XML_TipoDocumento AS XML_IDTipoDocumento,
+    @IDTipoDocumento AS IDTipoDocumento;
+
+/*** Check preventivi: Fine ***/
+
+BEGIN TRANSACTION 
+
+BEGIN TRY
+
+    SET @IDDocumento = NEWID();
+
+    PRINT @IDDocumento;
+
+    UPDATE FXML.ImportXML
+    SET IDStatoImportazione = 1, -- 1: importazione in corso
+        CedentePrestatore_DatiAnagrafici_IDFiscaleIVA_IdCodice = @XML_CedentePrestatore_DatiAnagrafici_IdFiscaleIVA_IdCodice,
+        DatiGenerali_DatiGeneraliDocumento_TipoDocumento = @XML_DatiGenerali_DatiGeneraliDocumento_TipoDocumento,
+        DatiGenerali_DatiGeneraliDocumento_Data = @XML_DatiGenerali_DatiGeneraliDocumento_Data,
+        DatiGenerali_DatiGeneraliDocumento_Numero = @XML_DatiGenerali_DatiGeneraliDocumento_Numero,
+        IDDocumento = @IDDocumento
+
+    WHERE PKImportXML = @PKImportXML;
+
+    PRINT 'Pre insert dbo.Documenti';
+
+    INSERT INTO dbo.Documenti
+    (
+        ID,
+        IDTipo,
+        IDStato,
+        IDCliFor,
+        IDCliFor_Indirizzo,
+        IDCausale,
+        IDMagazzino,
+        IDMagazzinoOpposto,
+        Numero,
+        NumeroPre,
+        NumeroInt,
+        NumeroPos,
+        Data,
+        DataConsegna,
+        CF,
+        PI,
+        Intestazione,
+        Intestazione2,
+        Indirizzo,
+        Cap,
+        Comune,
+        Provincia,
+        Nazione,
+        Pag_Modalita,
+        Pag_CalcolaImporti,
+        Pag_Banca,
+        Pag_Cin,
+        Pag_Abi,
+        Pag_Cab,
+        Pag_Cc,
+        Pag_Iban,
+        Pag_Bic,
+        Pag_Spese,
+        Pag_ExtraSconto,
+        Pag_ExtraSconto_Perc,
+        Dest_Intestazione,
+        Dest_Intestazione2,
+        Dest_Indirizzo,
+        Dest_Cap,
+        Dest_Comune,
+        Dest_Provincia,
+        Dest_Nazione,
+        Note,
+        TotRighe,
+        Inps,
+        TotImp,
+        TotIva,
+        TotLordo,
+        RitAcc,
+        TotDoc,
+        Righe,
+        RigheEvase,
+        RigheEvaseParz,
+        CondFor_Validita,
+        CondFor_Tempi,
+        CondFor_Trasporto,
+        CondFor_Resa,
+        CondFor_Note,
+        Trasp_TsInizio,
+        Trasp_Mezzo,
+        Trasp_Aspetto,
+        Trasp_Colli,
+        Trasp_Peso,
+        Trasp_Porto,
+        Trasp_Vettore1,
+        Trasp_Vettore2,
+        Trasp_Vettore3,
+        Trasp_IDVeicolo,
+        Trasp_DistanzaKm,
+        Trasp_MezzoCedente,
+        Trasp_MezzoCessionario,
+        NascondiTotali,
+        SoggettoRitAcc,
+        Pag_ModalitaSviluppata,
+        Protocollo,
+        DescrizioneRidottaSingolare,
+        AllegatoModello,
+        AllegatoFile,
+        IDFornitura,
+        IDBancaRB,
+        Creazione_Ts,
+        Creazione_IDUtente,
+        Modifica_Ts,
+        Modifica_IDUtente,
+        Allegato,
+        Rif_CodiceFornitore,
+        Rif_Ordine,
+        Rif_Magazzino,
+        SitPag_TotPagato,
+        SitPag_TotProvvigione,
+        SitPag_TotProvvigionePagato,
+        Pdf,
+        Pdf_Ts,
+        Riferimenti,
+        Evaso,
+        Evade,
+        IDReferente,
+        DataRichiesta,
+        ModelloReport,
+        Qta,
+        QtaEvasa,
+        SDI_Stato,
+        SDI_StatoTs,
+        SDI_LogEvento,
+        SDI_LogValidazione,
+        CodiceCIG,
+        CodiceCUP,
+        Sospeso,
+        HasDatiBollo,
+        ImportoBollo
+        -- #071 Richieste di modifica/integrazione - 28/11/2020 - BEGIN
+        , SDI_IDTipoDocumento
+        -- #071 Richieste di modifica/integrazione - 28/11/2020 - END
+    )
+    SELECT
+        @IDDocumento,      -- ID - uniqueidentifier
+        @IDTipoDocumento,       -- IDTipo - nvarchar(20)
+        NULL,       -- IDStato - nvarchar(10)
+        @IDCliFor,      -- IDCliFor - uniqueidentifier
+        NULL,      -- IDCliFor_Indirizzo - uniqueidentifier
+        NULL,       -- IDCausale - nvarchar(3)
+        NULL,       -- IDMagazzino - nvarchar(3)
+        NULL,       -- IDMagazzinoOpposto - nvarchar(3)
+        NULL,       -- Numero - nvarchar(20)
+        NULL,       -- NumeroPre - nvarchar(10)
+        NULL,         -- NumeroInt - int
+        NULL,       -- NumeroPos - nvarchar(10)
+        NULL, -- Data - datetime
+        NULL, -- DataConsegna - datetime
+        FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/CodiceFiscale').value('.', 'NVARCHAR(16)'),       -- CF - nvarchar(50)
+        FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdCodice').value('.', 'NVARCHAR(28)'),       -- PI - nvarchar(50)
+        CASE WHEN COALESCE(FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/Anagrafica/Denominazione').value('.', 'NVARCHAR(80)'), N'') = N''
+            THEN FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/Anagrafica/Cognome').value('.', 'NVARCHAR(80)')
+                + N' ' + FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/Anagrafica/Nome').value('.', 'NVARCHAR(80)')
+            ELSE FatturaElettronicaHeader.XML.query('CedentePrestatore/DatiAnagrafici/Anagrafica/Denominazione').value('.', 'NVARCHAR(80)')
+        END,       -- Intestazione - nvarchar(100)
+        NULL,       -- Intestazione2 - nvarchar(50)
+        FatturaElettronicaHeader.XML.query('CedentePrestatore/Sede/Indirizzo').value('.', 'NVARCHAR(60)'),       -- Indirizzo - nvarchar(50)
+        FatturaElettronicaHeader.XML.query('CedentePrestatore/Sede/CAP').value('.', 'NVARCHAR(5)'),       -- Cap - nvarchar(50)
+        FatturaElettronicaHeader.XML.query('CedentePrestatore/Sede/Comune').value('.', 'NVARCHAR(60)'),       -- Comune - nvarchar(50)
+        FatturaElettronicaHeader.XML.query('CedentePrestatore/Sede/Provincia').value('.', 'CHAR(2)'),       -- Provincia - nvarchar(50)
+        @Nazione,       -- Nazione - nvarchar(50)
+        NULL,       -- Pag_Modalita - nvarchar(100)
+        NULL,      -- Pag_CalcolaImporti - bit
+        NULL,       -- Pag_Banca - nvarchar(100)
+        NULL,       -- Pag_Cin - nvarchar(1)
+        NULL,       -- Pag_Abi - nvarchar(5)
+        NULL,       -- Pag_Cab - nvarchar(5)
+        NULL,       -- Pag_Cc - nvarchar(50)
+        NULL,       -- Pag_Iban - nvarchar(50)
+        NULL,       -- Pag_Bic - nvarchar(50)
+        NULL,      -- Pag_Spese - bit
+        NULL,       -- Pag_ExtraSconto - nvarchar(20)
+        NULL,       -- Pag_ExtraSconto_Perc - float
+        NULL,       -- Dest_Intestazione - nvarchar(100)
+        NULL,       -- Dest_Intestazione2 - nvarchar(50)
+        NULL,       -- Dest_Indirizzo - nvarchar(50)
+        NULL,       -- Dest_Cap - nvarchar(50)
+        NULL,       -- Dest_Comune - nvarchar(50)
+        NULL,       -- Dest_Provincia - nvarchar(50)
+        NULL,       -- Dest_Nazione - nvarchar(50)
+        NULL,       -- Note - nvarchar(2500)
+        NULL,      -- TotRighe - numeric(19, 6)
+        NULL,      -- Inps - numeric(19, 6)
+        NULL,      -- TotImp - numeric(19, 6)
+        NULL,      -- TotIva - numeric(19, 6)
+        NULL,      -- TotLordo - numeric(19, 6)
+        NULL,      -- RitAcc - numeric(19, 6)
+        NULL,      -- TotDoc - numeric(19, 6)
+        NULL,         -- Righe - int
+        NULL,         -- RigheEvase - int
+        NULL,         -- RigheEvaseParz - int
+        NULL,       -- CondFor_Validita - nvarchar(50)
+        NULL,       -- CondFor_Tempi - nvarchar(50)
+        NULL,       -- CondFor_Trasporto - nvarchar(50)
+        NULL,       -- CondFor_Resa - nvarchar(50)
+        NULL,       -- CondFor_Note - nvarchar(500)
+        NULL,       -- Trasp_TsInizio - nvarchar(50)
+        NULL,       -- Trasp_Mezzo - nvarchar(100)
+        NULL,       -- Trasp_Aspetto - nvarchar(100)
+        NULL,         -- Trasp_Colli - int
+        NULL,      -- Trasp_Peso - numeric(19, 6)
+        NULL,       -- Trasp_Porto - nvarchar(100)
+        NULL,       -- Trasp_Vettore1 - nvarchar(200)
+        NULL,       -- Trasp_Vettore2 - nvarchar(200)
+        NULL,       -- Trasp_Vettore3 - nvarchar(200)
+        NULL,       -- Trasp_IDVeicolo - nvarchar(50)
+        NULL,         -- Trasp_DistanzaKm - int
+        NULL,      -- Trasp_MezzoCedente - bit
+        NULL,      -- Trasp_MezzoCessionario - bit
+        NULL,      -- NascondiTotali - bit
+        NULL,      -- SoggettoRitAcc - bit
+        NULL,       -- Pag_ModalitaSviluppata - nvarchar(100)
+        NULL,       -- Protocollo - nvarchar(50)
+        NULL,       -- DescrizioneRidottaSingolare - nvarchar(50)
+        NULL,       -- AllegatoModello - nvarchar(255)
+        NULL,       -- AllegatoFile - nvarchar(255)
+        NULL,       -- IDFornitura - nvarchar(20)
+        NULL,       -- IDBancaRB - nvarchar(50)
+        CURRENT_TIMESTAMP, -- Creazione_Ts - datetime
+        NULL,       -- Creazione_IDUtente - nvarchar(20)
+        CURRENT_TIMESTAMP, -- Modifica_Ts - datetime
+        NULL,       -- Modifica_IDUtente - nvarchar(20)
+        NULL,       -- Allegato - nvarchar(255)
+        NULL,       -- Rif_CodiceFornitore - nvarchar(50)
+        NULL,       -- Rif_Ordine - nvarchar(255)
+        NULL,       -- Rif_Magazzino - nvarchar(50)
+        NULL,      -- SitPag_TotPagato - numeric(19, 6)
+        NULL,      -- SitPag_TotProvvigione - numeric(19, 6)
+        NULL,      -- SitPag_TotProvvigionePagato - numeric(19, 6)
+        NULL,      -- Pdf - bit
+        NULL, -- Pdf_Ts - datetime
+        NULL,       -- Riferimenti - nvarchar(2500)
+        NULL,       -- Evaso - nvarchar(255)
+        NULL,       -- Evade - nvarchar(255)
+        NULL,       -- IDReferente - nvarchar(20)
+        NULL, -- DataRichiesta - datetime
+        @ModelloReport,       -- ModelloReport - nvarchar(50)
+        NULL,      -- Qta - numeric(19, 6)
+        NULL,      -- QtaEvasa - numeric(19, 6)
+        -1,         -- SDI_Stato - int
+        CURRENT_TIMESTAMP, -- SDI_StatoTs - datetime
+        NULL,       -- SDI_LogEvento - nvarchar(500)
+        NULL,       -- SDI_LogValidazione - nvarchar(1500)
+        NULL,       -- CodiceCIG - nvarchar(15)
+        NULL,       -- CodiceCUP - nvarchar(15)
+        CAST(0 AS BIT),      -- Sospeso - bit
+        CAST(0 AS BIT),      -- HasDatiBollo - bit
+        0.0       -- ImportoBollo - decimal(14, 2)
+        -- #071 Richieste di modifica/integrazione - 28/11/2020 - BEGIN
+        , @XML_TipoDocumento
+        -- #071 Richieste di modifica/integrazione - 28/11/2020 - END
+
+    FROM FXML.ImportXML IXML
+    CROSS APPLY @XML.nodes('//FatturaElettronicaHeader') AS FatturaElettronicaHeader (XML)
+    WHERE IXML.PKImportXML = @PKImportXML;
+
+    PRINT 'Post insert dbo.Documenti';
+
+    PRINT 'Pre update dbo.Documenti';
+
+    DECLARE @Numero NVARCHAR(20);
+    DECLARE @Data DATETIME;
+    DECLARE @HasDatiBollo BIT;
+    DECLARE @ImportoBollo DECIMAL(14, 2);
+    DECLARE @TotRighe DECIMAL(19, 6);
+    DECLARE @Inps DECIMAL(19, 6);
+    DECLARE @ImportoInps DECIMAL(19, 6);
+    DECLARE @TotImp DECIMAL(19, 6);
+    DECLARE @TotIva DECIMAL(19, 6);
+    DECLARE @TotLordo DECIMAL(19, 6);
+    DECLARE @RitAcc DECIMAL(19, 6);
+    DECLARE @ImportoRitAcc DECIMAL(19, 6);
+    --DECLARE @SoggettoRitAcc BIT;
+    DECLARE @TotDoc DECIMAL(19, 6);
+
+    SELECT
+        @Numero = FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Numero').value('.', N'NVARCHAR(20)'),
+        @Data = FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/Data').value('.', N'DATE'),
+
+        @HasDatiBollo = CASE WHEN COALESCE(FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiBollo/BolloVirtuale').value('.', N'CHAR(2)'), '') = '' THEN 0 ELSE 1 END,
+        @ImportoBollo = CASE WHEN COALESCE(FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiBollo/ImportoBollo').value('.', N'NVARCHAR(20)'), N'') = N'' THEN 0.0 ELSE CONVERT(DECIMAL(14, 2), FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiBollo/ImportoBollo').value('.', N'NVARCHAR(20)')) END,
+        @Inps = CASE WHEN COALESCE(FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiCassaPrevidenziale/TipoCassa').value('.', N'NVARCHAR(20)'), N'') = N'TC22'
+            THEN CONVERT(DECIMAL(19, 6), FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiCassaPrevidenziale/AlCassa').value('.', N'NVARCHAR(20)'))
+            ELSE 0.0
+        END,
+        @ImportoInps = CASE WHEN COALESCE(FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiCassaPrevidenziale/TipoCassa').value('.', N'NVARCHAR(20)'), N'') = N'TC22'
+            THEN CONVERT(DECIMAL(19, 6), FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiCassaPrevidenziale/ImportoContributoCassa').value('.', N'NVARCHAR(20)'))
+            ELSE 0.0
+        END,
+        @RitAcc = CASE WHEN COALESCE(FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiRitenuta/AliquotaRitenuta').value('.', N'NVARCHAR(20)'), N'') = N'' THEN 0.0 ELSE CONVERT(DECIMAL(19, 6), FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiRitenuta/AliquotaRitenuta').value('.', N'NVARCHAR(20)')) END,
+        @ImportoRitAcc = CASE WHEN COALESCE(FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiRitenuta/ImportoRitenuta').value('.', N'NVARCHAR(20)'), N'') = N'' THEN 0.0 ELSE CONVERT(DECIMAL(19, 6), FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/DatiRitenuta/ImportoRitenuta').value('.', N'NVARCHAR(20)')) END,
+        @TotLordo = CONVERT(DECIMAL(19, 6), FatturaElettronicaBody.XML.query('DatiGenerali/DatiGeneraliDocumento/ImportoTotaleDocumento').value('.', N'NVARCHAR(20)'))
+    
+	FROM dbo.Documenti D
+    INNER JOIN FXML.ImportXML TXML ON TXML.PKImportXML = @PKImportXML
+    CROSS APPLY @XML.nodes('//FatturaElettronicaBody') AS FatturaElettronicaBody (XML)
+    WHERE D.ID = @IDDocumento;
+
+    UPDATE D
+    SET D.Numero = @Numero,
+        D.[Data] = @Data,
+
+        D.HasDatiBollo = @HasDatiBollo,
+        D.ImportoBollo = @ImportoBollo,
+
+        D.TotLordo = @TotLordo,
+        D.TotDoc = @TotLordo - COALESCE(@ImportoRitAcc, 0.0),
+
+        D.Inps = @Inps,
+
+		D.SoggettoRitAcc = CASE WHEN COALESCE(@RitAcc, 0.0) = 0.0 THEN 0 ELSE 1 END,
+        D.RitAcc = @RitAcc
+    
+	FROM dbo.Documenti D
+    INNER JOIN FXML.ImportXML TXML ON TXML.PKImportXML = @PKImportXML
+    CROSS APPLY @XML.nodes('//FatturaElettronicaBody') AS FatturaElettronicaBody (XML)
+    WHERE D.ID = @IDDocumento;
+
+    PRINT 'Post update dbo.Documenti';
+
+    EXEC FXML.ssp_ImportaXMLPassivo_Documenti_Righe @PKImportXML = @PKImportXML, @IDDocumento = @IDDocumento;
+
+    EXEC FXML.ssp_ImportaXMLPassivo_Documenti_Scadenze @PKImportXML = @PKImportXML, @IDDocumento = @IDDocumento;
+
+	EXEC FXML.ssp_ImportaXMLPassivo_Documenti_Iva @PKImportXML = @PKImportXML, @IDDocumento = @IDDocumento;	
+
+    UPDATE FXML.ImportXML
+    SET IDStatoImportazione = 2, -- 2: importazione terminata correttamente
+        IDDocumento = @IDDocumento
+    WHERE PKImportXML = @PKImportXML;
+    
+    COMMIT TRANSACTION
+
+    --SELECT * FROM dbo.Documenti WHERE ID = @IDDocumento;
+
+    --SELECT * FROM dbo.Documenti_Righe WHERE IDDocumento = @IDDocumento ORDER BY SDI_NumeroLinea;
+
+    --SELECT * FROM dbo.Documenti_Scadenze WHERE IDDocumento = @IDDocumento ORDER BY Numero;
+
+END TRY
+BEGIN CATCH
+
+    PRINT 'Rollback!';
+
+    ROLLBACK TRANSACTION
+
+    UPDATE FXML.ImportXML
+    SET IDStatoImportazione = 99 -- 99: importazione terminata con errori
+    WHERE PKImportXML = @PKImportXML;
+
+    SET @IDDocumento = NULL;
+
+END CATCH
+
+-- #071 Richieste di modifica/integrazione - 28/11/2020 - BEGIN
+END;
+-- #071 Richieste di modifica/integrazione - 28/11/2020 - END
+
+END;
+GO
+
+ALTER PROCEDURE FXML.ssp_EsportaDatiFattura_Body (
+	@IDDocumento UNIQUEIDENTIFIER,
+	@PKStaging_FatturaElettronicaHeader BIGINT
+) AS
+BEGIN
+
+	SET NOCOUNT ON;
+
+	DECLARE @PKStaging_FatturaElettronicaBody BIGINT;
+
+	SET @PKStaging_FatturaElettronicaBody = NEXT VALUE FOR InVoiceXML.XMLFatture.seq_Staging_FatturaElettronicaBody;
+
+	DELETE FROM InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody WHERE PKStaging_FatturaElettronicaHeader = @PKStaging_FatturaElettronicaHeader;
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody
+	(
+		PKStaging_FatturaElettronicaBody,
+		PKStaging_FatturaElettronicaHeader,
+		DatiGenerali_DatiGeneraliDocumento_TipoDocumento, -- 2.1.1.1
+		DatiGenerali_DatiGeneraliDocumento_Divisa, -- 2.1.1.2
+		DatiGenerali_DatiGeneraliDocumento_Data, -- 2.1.1.3
+		DatiGenerali_DatiGeneraliDocumento_Numero, -- 2.1.1.4
+		DatiGenerali_DatiGeneraliDocumento_ImportoTotaleDocumento, -- 2.1.1.9
+        DatiGenerali_DatiGeneraliDocumento_DatiBollo_BolloVirtuale, -- 2.1.1.6.1
+        DatiGenerali_DatiGeneraliDocumento_DatiBollo_ImportoBollo -- 2.1.1.6.2
+	)
+	SELECT
+		@PKStaging_FatturaElettronicaBody,
+		@PKStaging_FatturaElettronicaHeader,
+		-- #071 Richieste di modifica/integrazione - 29/11/2020 - BEGIN
+        -- Era: DT.SDI_TipoDocumento,
+        D.SDI_IDTipoDocumento,
+		-- #071 Richieste di modifica/integrazione - 29/11/2020 - END
+		N'EUR',
+		D.[Data],
+		D.Numero,
+		--CONVERT(NVARCHAR(10), D.NumeroInt) + COALESCE(N'/' + DT.Sezionale, N''),
+		ROUND(D.TotDoc, 2),
+        CASE WHEN D.HasDatiBollo = CAST(1 AS BIT) THEN 'SI' ELSE NULL END,
+        CASE WHEN D.HasDatiBollo = CAST(1 AS BIT) THEN D.ImportoBollo ELSE NULL END
+
+	FROM dbo.Documenti D
+	INNER JOIN dbo.Documenti_Tipi DT ON DT.ID = D.IDTipo
+	LEFT JOIN dbo.Causali C ON C.ID = D.IDCausale
+	WHERE D.ID = @IDDocumento;
+
+	UPDATE SFEB
+	SET SFEB.DatiGenerali_DatiGeneraliDocumento_DatiRitenuta_TipoRitenuta = PTR.Valore, -- 2.1.1.5.1
+		SFEB.DatiGenerali_DatiGeneraliDocumento_DatiRitenuta_ImportoRitenuta = ROUND(D.RitAcc, 2), -- 2.1.1.5.2
+		SFEB.DatiGenerali_DatiGeneraliDocumento_DatiRitenuta_AliquotaRitenuta = CONVERT(DECIMAL(5, 2), PRA.Valore), -- 2.1.1.5.3
+		SFEB.DatiGenerali_DatiGeneraliDocumento_DatiRitenuta_CausalePagamento = PCPR.Valore -- 2.1.1.5.4
+
+	FROM dbo.Documenti D
+	INNER JOIN dbo.Documenti_Tipi DT ON DT.ID = D.IDTipo
+	--LEFT JOIN dbo.Causali C ON C.ID = D.IDCausale
+	INNER JOIN dbo.Conf_Parametri PTR ON PTR.ID = N'Company.SDI_TipoRitenuta'
+	INNER JOIN dbo.Conf_Parametri PRA ON PRA.ID = N'Documents.RitAcc'
+	INNER JOIN dbo.Conf_Parametri PCPR ON PCPR.ID = N'Company.SDI_CausalePagamentoRitenuta'
+	INNER JOIN InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody SFEB ON SFEB.PKStaging_FatturaElettronicaBody = @PKStaging_FatturaElettronicaBody
+	WHERE D.ID = @IDDocumento
+		AND D.SoggettoRitAcc = CAST(1 AS BIT);
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DatiCassaPrevidenziale
+	(
+		--PKStaging_FatturaElettronicaBody_DatiCassaPrevidenziale,
+		PKStaging_FatturaElettronicaBody,
+		TipoCassa,
+		AlCassa,
+		ImportoContributoCassa,
+		ImponibileCassa,
+		AliquotaIVA,
+		Ritenuta,
+		Natura--,
+		--RiferimentoAmministrazione
+	)
+	SELECT
+		@PKStaging_FatturaElettronicaBody,
+		PTC.Valore AS TipoCassa, -- 2.1.1.7.1
+		CONVERT(DECIMAL(5, 2), PDI.Valore) AS AlCassa, -- 2.1.1.7.2
+		ROUND(D.Inps, 2) AS ImportoContributoCassa, -- 2.1.1.7.3
+		ROUND(D.TotRighe, 2) AS ImponibileCassa, -- 2.1.1.7.4
+		COALESCE(CI.Perc, NULL) AS AliquotaIVA, -- 2.1.1.7.5
+		COALESCE(PRC.Valore, '') AS Ritenuta, -- 2.1.1.7.6
+		COALESCE(CI.SDI_Natura, '') AS Natura -- 2.1.1.7.7
+
+	FROM dbo.Documenti D
+	INNER JOIN dbo.Conf_Parametri PTC ON PTC.ID = N'Company.SDI_TipoCassa'
+	INNER JOIN dbo.Conf_Parametri PDI ON PDI.ID = N'Documents.Inps'
+	LEFT JOIN dbo.Conf_Parametri PCIC ON PCIC.ID = N'Company.CodiceIvaCassa'
+	LEFT JOIN dbo.CodiciIva CI ON CI.ID = PCIC.Valore
+	LEFT JOIN dbo.Conf_Parametri PRC ON PRC.ID = N'Company.RitenutaCassa'
+	WHERE D.ID = @IDDocumento
+		AND D.Inps > 0.0;
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_Causale
+	(
+		--PKStaging_FatturaElettronicaBody_Causale,
+		PKStaging_FatturaElettronicaBody,
+		DatiGenerali_Causale
+	)
+	SELECT
+		@PKStaging_FatturaElettronicaBody,
+		COALESCE(C.Descrizione, N'???') -- 2.1.1.11
+
+	FROM dbo.Documenti D
+	INNER JOIN dbo.Documenti_Tipi DT ON DT.ID = D.IDTipo
+	LEFT JOIN dbo.Causali C ON C.ID = D.IDCausale
+	WHERE D.ID = @IDDocumento;
+
+	DECLARE @PKStaging_FatturaElettronicaBody_DatiDDT BIGINT;
+
+	IF OBJECT_ID('tempdb..#DatiDDT') IS	NOT NULL DROP TABLE #DatiDDT;
+
+	SELECT DISTINCT
+		DDDT.Numero AS NumeroDDT,
+		CONVERT(DATE, DDDT.Data) AS DataDDT,
+		CAST(NULL AS BIGINT) AS PKStaging_FatturaElettronicaBody_DatiDDT
+
+	INTO #DatiDDT
+
+	FROM dbo.Documenti_Righe DR
+	INNER JOIN dbo.Documenti D ON D.ID = DR.IDDocumento
+	INNER JOIN dbo.Documenti_Righe DRDDT ON DRDDT.ID = DR.IDDocumento_RigaOrigine
+	INNER JOIN dbo.Documenti DDDT ON DDDT.ID = DRDDT.IDDocumento
+		AND DDDT.IDTipo = N'Cli_DDT'
+	WHERE D.ID = @IDDocumento
+		AND COALESCE(DR.Qta, 0.0) > 0.0
+		AND COALESCE(DR.ImpUnitario, 0.0) <> 0.0;
+
+	DECLARE @NumeroDDT NVARCHAR(20);
+	DECLARE @DataDDT DATE;
+
+	DECLARE curDatiDDT CURSOR FAST_FORWARD READ_ONLY FOR
+		SELECT
+			TT.NumeroDDT,
+			TT.DataDDT
+
+		FROM #DatiDDT TT;
+
+	OPEN curDatiDDT
+
+	FETCH NEXT FROM curDatiDDT INTO @NumeroDDT, @DataDDT;
+
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+
+		SET @PKStaging_FatturaElettronicaBody_DatiDDT = NEXT VALUE FOR InVoiceXML.XMLFatture.seq_Staging_FatturaElettronicaBody_DatiDDT;
+	
+		INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DatiDDT
+		(
+			PKStaging_FatturaElettronicaBody_DatiDDT,
+			PKStaging_FatturaElettronicaBody,
+			NumeroDDT,
+			DataDDT
+		)
+		VALUES
+		(   @PKStaging_FatturaElettronicaBody_DatiDDT,
+			@PKStaging_FatturaElettronicaBody,
+			@NumeroDDT, -- 2.1.8.1
+			@DataDDT -- 2.1.8.2
+		);
+
+		UPDATE #DatiDDT
+		SET PKStaging_FatturaElettronicaBody_DatiDDT = @PKStaging_FatturaElettronicaBody_DatiDDT
+		WHERE NumeroDDT = @NumeroDDT AND DataDDT = @DataDDT;
+
+		FETCH NEXT FROM curDatiDDT INTO @NumeroDDT, @DataDDT;
+	END
+
+	CLOSE curDatiDDT;
+	DEALLOCATE curDatiDDT;
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DatiDDT_RiferimentoNumeroLinea
+	(
+		--PKStaging_FatturaElettronicaBody_DatiDDT_RiferimentoNumeroLinea,
+		PKStaging_FatturaElettronicaBody_DatiDDT,
+		RiferimentoNumeroLinea
+	)
+	SELECT
+		TT.PKStaging_FatturaElettronicaBody_DatiDDT,
+		--DDDT.Numero AS NumeroDDT,
+		--DDDT.[Data] AS DataDDT,
+		DR.SDI_NumeroLinea AS RiferimentoNumeroLinea -- 2.1.8.3
+
+	FROM dbo.Documenti_Righe DR
+	INNER JOIN dbo.Documenti D ON D.ID = DR.IDDocumento
+	INNER JOIN dbo.Documenti_Righe DRDDT ON DRDDT.ID = DR.IDDocumento_RigaOrigine
+	INNER JOIN dbo.Documenti DDDT ON DDDT.ID = DRDDT.IDDocumento
+		AND DDDT.IDTipo = N'Cli_DDT'
+	INNER JOIN #DatiDDT TT ON TT.NumeroDDT = DDDT.Numero AND TT.DataDDT = DDDT.[Data]
+	WHERE D.ID = @IDDocumento
+		AND COALESCE(DR.Qta, 0.0) > 0.0
+		AND COALESCE(DR.ImpUnitario, 0.0) <> 0.0;
+
+	DECLARE @PKStaging_FatturaElettronicaBody_DettaglioLinee BIGINT;
+
+	IF OBJECT_ID('tempdb..#DettaglioLinee') IS	NOT NULL DROP TABLE #DettaglioLinee;
+
+	SELECT
+		DR.ID,
+		DR.SDI_NumeroLinea,
+		CAST(NULL AS BIGINT) AS PKStaging_FatturaElettronicaBody_DettaglioLinee
+
+	INTO #DettaglioLinee
+
+	FROM dbo.Documenti_Righe DR
+	LEFT JOIN dbo.CodiciIva CI ON CI.ID = DR.CodIva
+	WHERE DR.IDDocumento = @IDDocumento
+		AND COALESCE(DR.Qta, 0.0) > 0.0
+		AND COALESCE(DR.ImpUnitario, 0.0) <> 0.0
+	ORDER BY DR.SDI_NumeroLinea;
+
+	DECLARE @ID UNIQUEIDENTIFIER;
+	DECLARE @SDI_NumeroLinea INT;
+
+	DECLARE curDettaglioLinee CURSOR FAST_FORWARD READ_ONLY FOR
+		SELECT
+			TT.ID,
+			TT.SDI_NumeroLinea
+
+		FROM #DettaglioLinee TT;
+
+	OPEN curDettaglioLinee
+
+	FETCH NEXT FROM curDettaglioLinee INTO @ID, @SDI_NumeroLinea;
+
+	WHILE @@FETCH_STATUS = 0
+	BEGIN
+
+		SET @PKStaging_FatturaElettronicaBody_DettaglioLinee = NEXT VALUE FOR InVoiceXML.XMLFatture.seq_Staging_FatturaElettronicaBody_DettaglioLinee;
+	
+		INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DettaglioLinee
+		(
+			PKStaging_FatturaElettronicaBody_DettaglioLinee,
+			PKStaging_FatturaElettronicaBody,
+			NumeroLinea,
+			TipoCessionePrestazione,
+			Descrizione,
+			Quantita,
+			UnitaMisura,
+			PrezzoUnitario,
+			PrezzoTotale,
+			AliquotaIVA,
+			Ritenuta,
+			Natura
+		)
+		SELECT
+			@PKStaging_FatturaElettronicaBody_DettaglioLinee,
+			@PKStaging_FatturaElettronicaBody,
+			DR.SDI_NumeroLinea, -- 2.2.1.1
+			'', -- 2.2.1.2
+			DR.Descrizione1, -- 2.2.1.4
+			DR.Qta, -- 2.2.1.5
+			DR.IDUnitaMisura, -- 2.2.1.6
+			DR.ImpUnitario, -- 2.2.1.9
+			--DR.ImpNettoScontato, -- 2.2.1.11
+			--DR.ImpNettoScontato *  CASE WHEN TRY_CAST(D.Pag_ExtraSconto AS DECIMAL(28, 12)) IS NULL THEN 1.0 ELSE 1.0 - TRY_CAST(D.Pag_ExtraSconto AS DECIMAL(28, 12)) / 100.0 END, -- 2.2.1.11
+			DR.ImpNettoScontato * (100.0 - COALESCE(FXML.sfn_PercentualeScontoMaggiorazione(D.Pag_ExtraSconto), 0.0)) / 100.0, -- 2.2.1.11
+			COALESCE(CI.Perc, 0.0), -- 2.2.1.12
+			CASE WHEN D.SoggettoRitAcc = CAST(1 AS BIT) THEN 'SI' ELSE '' END, -- 2.2.1.13
+			COALESCE(CI.SDI_Natura, '') -- 2.2.1.14
+
+		FROM dbo.Documenti_Righe DR
+		INNER JOIN dbo.Documenti D ON D.ID = DR.IDDocumento
+		LEFT JOIN dbo.CodiciIva CI ON CI.ID = DR.CodIva
+		WHERE DR.IDDocumento = @IDDocumento
+			AND DR.ID = @ID
+			AND COALESCE(DR.Qta, 0.0) > 0.0
+			AND COALESCE(DR.ImpUnitario, 0.0) <> 0.0;
+
+		UPDATE #DettaglioLinee
+		SET PKStaging_FatturaElettronicaBody_DettaglioLinee = @PKStaging_FatturaElettronicaBody_DettaglioLinee
+		WHERE ID = @ID;
+
+		FETCH NEXT FROM curDettaglioLinee INTO @ID, @SDI_NumeroLinea;
+	END
+
+	CLOSE curDettaglioLinee;
+	DEALLOCATE curDettaglioLinee;
+
+	/* Gestione documenti esterni (es. ordine di acquisto) - Inizio */
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DocumentoEsterno
+	(
+	    --PKStaging_FatturaElettronicaBody_DocumentoEsterno,
+	    PKStaging_FatturaElettronicaBody,
+	    TipoDocumentoEsterno,
+	    IdDocumento,
+	    Data,
+	    CodiceCUP,
+	    CodiceCIG
+	)
+	SELECT DISTINCT
+		@PKStaging_FatturaElettronicaBody,
+		'OACQ' AS TipoDocumentoEsterno,
+		CASE
+		  WHEN DO.IDTipo = 'Cli_Ordine' THEN DO.Numero
+		  WHEN DOO.IDTipo = 'Cli_Ordine' THEN DOO.Numero
+		  ELSE NULL
+		END AS Numero, -- 2.1.2.3
+		CASE
+		  WHEN DO.IDTipo = 'Cli_Ordine' THEN CAST(DO.Data AS DATE)
+		  WHEN DOO.IDTipo = 'Cli_Ordine' THEN CAST(DOO.Data AS DATE)
+		  ELSE NULL
+		END AS Data, -- 2.1.2.4
+		CASE
+		  WHEN DO.IDTipo = 'Cli_Ordine' THEN COALESCE(DO.CodiceCUP, NULL)
+		  WHEN DOO.IDTipo = 'Cli_Ordine' THEN COALESCE(DOO.CodiceCUP, NULL)
+		  ELSE NULL
+		END AS CodiceCUP, -- 2.1.2.6
+		CASE
+		  WHEN DO.IDTipo = 'Cli_Ordine' THEN COALESCE(DO.CodiceCIG, NULL)
+		  WHEN DOO.IDTipo = 'Cli_Ordine' THEN COALESCE(DOO.CodiceCIG, NULL)
+		  ELSE NULL
+		END AS CodiceCIG -- 2.1.2.7
+
+	FROM dbo.Documenti D
+	INNER JOIN dbo.CliFor CF ON CF.ID = D.IDCliFor
+	INNER JOIN dbo.Documenti_Righe DR ON DR.IDDocumento = D.ID
+		AND DR.Qta > 0.0
+		AND DR.ImpUnitario > 0.0
+	INNER JOIN dbo.Documenti_Righe DRO ON DRO.ID = DR.IDDocumento_RigaOrigine
+	INNER JOIN dbo.Documenti DO ON DO.ID = DRO.IDDocumento
+	INNER JOIN dbo.Documenti_Tipi DTO ON DTO.ID = DO.IDTipo
+	LEFT JOIN dbo.Documenti_Righe DROO ON DROO.ID = DRO.IDDocumento_RigaOrigine
+	LEFT JOIN dbo.Documenti DOO ON DOO.ID = DROO.IDDocumento
+	LEFT JOIN dbo.Documenti_Tipi DTOO ON DTOO.ID = DOO.IDTipo
+	WHERE D.ID = @IDDocumento
+		AND COALESCE(DOO.IDTipo, DO.IDTipo) = N'Cli_Ordine';
+
+    IF OBJECT_ID('tempdb..#DettaglioLinee_Ordini') IS NOT NULL DROP TABLE #DettaglioLinee_Ordini;
+
+    SELECT DISTINCT
+        CASE
+		  WHEN DO.IDTipo = 'Cli_Ordine' THEN DO.Numero
+		  WHEN DOO.IDTipo = 'Cli_Ordine' THEN DOO.Numero
+		  ELSE NULL
+		END COLLATE SQL_Latin1_General_CP1_CI_AS AS Numero, -- 2.1.2.3
+		CASE
+		  WHEN DO.IDTipo = 'Cli_Ordine' THEN CAST(DO.Data AS DATE)
+		  WHEN DOO.IDTipo = 'Cli_Ordine' THEN CAST(DOO.Data AS DATE)
+		  ELSE NULL
+		END AS Data,
+        DR.SDI_NumeroLinea
+
+    INTO #DettaglioLinee_Ordini
+
+	FROM dbo.Documenti D
+	INNER JOIN dbo.CliFor CF ON CF.ID = D.IDCliFor
+	INNER JOIN dbo.Documenti_Righe DR ON DR.IDDocumento = D.ID
+		AND DR.Qta > 0.0
+		AND DR.ImpUnitario > 0.0
+	INNER JOIN dbo.Documenti_Righe DRO ON DRO.ID = DR.IDDocumento_RigaOrigine
+	INNER JOIN dbo.Documenti DO ON DO.ID = DRO.IDDocumento
+	INNER JOIN dbo.Documenti_Tipi DTO ON DTO.ID = DO.IDTipo
+	LEFT JOIN dbo.Documenti_Righe DROO ON DROO.ID = DRO.IDDocumento_RigaOrigine
+	LEFT JOIN dbo.Documenti DOO ON DOO.ID = DROO.IDDocumento
+	LEFT JOIN dbo.Documenti_Tipi DTOO ON DTOO.ID = DOO.IDTipo
+	WHERE D.ID = @IDDocumento
+		AND COALESCE(DOO.IDTipo, DO.IDTipo) = N'Cli_Ordine';
+
+    IF ((SELECT COUNT(DISTINCT Numero) FROM #DettaglioLinee_Ordini) > 1)
+    BEGIN
+
+        INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DocumentoEsterno_RiferimentoNumeroLinea
+        (
+            --PKStaging_FatturaElettronicaBody_DocumentoEsterno_RiferimentoNumeroLinea,
+            PKStaging_FatturaElettronicaBody_DocumentoEsterno,
+            RiferimentoNumeroLinea
+        )
+        SELECT
+            DE.PKStaging_FatturaElettronicaBody_DocumentoEsterno,
+            DLO.SDI_NumeroLinea AS RiferimentoNumeroLinea
+
+        FROM #DettaglioLinee_Ordini DLO
+        INNER JOIN InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DocumentoEsterno DE ON DE.Data = DLO.Data AND DE.IdDocumento = DLO.Numero
+        ORDER BY DE.PKStaging_FatturaElettronicaBody_DocumentoEsterno,
+            DLO.SDI_NumeroLinea;
+
+    END;
+
+    -- #071 Richieste di modifica/integrazione - 30/11/2020 - BEGIN
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DocumentoEsterno
+	(
+	    --PKStaging_FatturaElettronicaBody_DocumentoEsterno,
+	    PKStaging_FatturaElettronicaBody,
+	    TipoDocumentoEsterno,
+	    IdDocumento
+	)
+	SELECT DISTINCT
+		@PKStaging_FatturaElettronicaBody,
+		'OACQ' AS TipoDocumentoEsterno,
+        SS.Data AS IdDocumento -- 2.1.2.3
+
+	FROM dbo.Documenti D
+    CROSS APPLY FXML.sfn_SplitString(D.Rif_Ordine, CHAR(13)+CHAR(10)) SS
+    WHERE D.Rif_Ordine <> N'';
+    -- #071 Richieste di modifica/integrazione - 30/11/2020 - END
+
+	/* Gestione documenti esterni (es. ordine di acquisto) - Fine */
+
+	/* Gestione spese sui pagamenti (es. marca da bollo) - Inizio */
+
+	--DECLARE @IDDocumento UNIQUEIDENTIFIER = '412A0669-4EBB-4364-9477-342B1C5AC25C'
+	DECLARE @NumeroLineaOffset INT;
+	SELECT @NumeroLineaOffset = COALESCE(MAX(SDI_NumeroLinea), 0) FROM #DettaglioLinee;
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DettaglioLinee
+	(
+		--PKStaging_FatturaElettronicaBody_DettaglioLinee,
+		PKStaging_FatturaElettronicaBody,
+		NumeroLinea,
+		TipoCessionePrestazione,
+		Descrizione,
+		Quantita,
+		UnitaMisura,
+		PrezzoUnitario,
+		PrezzoTotale,
+		AliquotaIVA,
+		Ritenuta,
+		Natura
+	)
+	SELECT
+		--@PKStaging_FatturaElettronicaBody_DettaglioLinee,
+		@PKStaging_FatturaElettronicaBody,
+		@NumeroLineaOffset + ROW_NUMBER() OVER (ORDER BY DS.ID), -- 2.2.1.1
+		'', -- 2.2.1.2
+		DS.Descrizione, -- 2.2.1.4
+		1.0 AS Quantita, -- 2.2.1.5
+		'', -- 2.2.1.6
+		DS.ImpNetto, -- 2.2.1.9
+		DS.ImpNetto, -- 2.2.1.11
+		COALESCE(CI.Perc, 0.0), -- 2.2.1.12
+		'', -- 2.2.1.13
+		COALESCE(CI.SDI_Natura, '') -- 2.2.1.14
+
+	FROM dbo.Documenti_Spese DS
+	INNER JOIN dbo.Documenti D ON D.ID = DS.IDDocumento
+	LEFT JOIN dbo.CodiciIva CI ON CI.ID = DS.CodIva
+	WHERE D.ID = @IDDocumento;
+
+	/* Gestione spese sui pagamenti (es. marca da bollo) - Fine */
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DettaglioLinee_CodiceArticolo
+	(
+		--PKStaging_FatturaElettronicaBody_DettaglioLinee_CodiceArticolo,
+		PKStaging_FatturaElettronicaBody_DettaglioLinee,
+		CodiceArticolo_CodiceTipo,
+		CodiceArticolo_CodiceValore
+	)
+	SELECT
+		DL.PKStaging_FatturaElettronicaBody_DettaglioLinee,
+		'ITEM', -- 2.2.1.3.1
+		COALESCE(DR.Codice, N'SERVIZIO') -- 2.2.1.3.2
+
+	FROM dbo.Documenti_Righe DR
+	INNER JOIN #DettaglioLinee DL ON DL.ID = DR.ID
+	WHERE DR.IDDocumento = @IDDocumento
+		AND COALESCE(DR.Qta, 0.0) > 0.0
+		AND COALESCE(DR.ImpUnitario, 0.0) <> 0.0; -- Ridondante (ho già filtrato #DettaglioLinee)
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DettaglioLinee_ScontoMaggiorazione
+	(
+		--PKStaging_FatturaElettronicaBody_DettaglioLinee_ScontoMaggiorazione,
+		PKStaging_FatturaElettronicaBody_DettaglioLinee,
+		ScontoMaggiorazione_Tipo,
+		ScontoMaggiorazione_Percentuale,
+		ScontoMaggiorazione_Importo
+	)
+	SELECT
+		DL.PKStaging_FatturaElettronicaBody_DettaglioLinee,
+        'SC' AS Tipo, -- 2.2.1.10.1
+        ----NULL AS Percentuale, -- 2.2.1.10.2
+        ----ROUND(DR.ImpUnitario * (1.0 - COALESCE((100.0 - FXML.sfn_PercentualeScontoMaggiorazione(DR.Sconto)) / 100.0, 1.0) * COALESCE((100.0 - FXML.sfn_PercentualeScontoMaggiorazione(D.Pag_ExtraSconto)) / 100.0, 1.0)), 2) -- 2.2.1.10.3
+        ROUND((1.0 - COALESCE((100.0 - FXML.sfn_PercentualeScontoMaggiorazione(DR.Sconto)) / 100.0, 1.0) * COALESCE((100.0 - FXML.sfn_PercentualeScontoMaggiorazione(D.Pag_ExtraSconto)) / 100.0, 1.0)) * 100.0, 2), -- 2.2.1.10.2
+        NULL -- 2.2.1.10.3
+
+	FROM dbo.Documenti_Righe DR
+	INNER JOIN #DettaglioLinee DL ON DL.ID = DR.ID
+	INNER JOIN dbo.Documenti D ON D.ID = DR.IDDocumento
+	WHERE DR.IDDocumento = @IDDocumento
+		AND COALESCE(DR.Qta, 0.0) > 0.0
+		AND COALESCE(DR.ImpUnitario, 0.0) <> 0.0
+		AND (
+            COALESCE(DR.Sconto, N'') <> N''
+            OR COALESCE(D.Pag_ExtraSconto, N'') <> N''
+        );
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DatiRiepilogo
+	(
+		--PKStaging_FatturaElettronicaBody_DatiRiepilogo,
+		PKStaging_FatturaElettronicaBody,
+		AliquotaIVA,
+		Natura,
+		----SpeseAccessorie,
+		Arrotondamento,
+		ImponibileImporto,
+		Imposta,
+		EsigibilitaIVA,
+		RiferimentoNormativo
+	)
+	SELECT
+		@PKStaging_FatturaElettronicaBody,
+		CI.Perc, -- 2.2.2.1
+		CI.SDI_Natura, -- 2.2.2.2
+		0.0, -- 2.2.2.4 
+		DI.ImpNetto, -- 2.2.2.5
+		DI.ImpIva, -- 2.2.2.6
+		CI.SDI_EsigibilitaIVA, -- 2.2.2.7
+		CI.SDI_RiferimentoNormativo -- 2.2.2.8
+
+	FROM dbo.Documenti_IVA DI
+	LEFT JOIN dbo.CodiciIva CI ON CI.ID = DI.CodIva
+	WHERE DI.IDDocumento = @IDDocumento;
+
+	DECLARE @PKStaging_FatturaElettronicaBody_DatiPagamento BIGINT;
+	SET @PKStaging_FatturaElettronicaBody_DatiPagamento = NEXT VALUE FOR InVoiceXML.XMLFatture.seq_FatturaElettronicaBody_DatiPagamento;
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DatiPagamento
+	(
+		PKStaging_FatturaElettronicaBody_DatiPagamento,
+		PKStaging_FatturaElettronicaBody,
+		CondizioniPagamento
+	)
+	SELECT
+		@PKStaging_FatturaElettronicaBody_DatiPagamento,
+		@PKStaging_FatturaElettronicaBody,
+		CASE WHEN COUNT(1) = 1 THEN 'TP02' ELSE 'TP01' END -- 2.4.1
+
+	FROM dbo.Documenti_Scadenze DS
+	INNER JOIN dbo.ModalitaPagamento_Tipi MPT ON MPT.ID = DS.IDTipoPagamento
+	INNER JOIN dbo.Documenti D ON D.ID = DS.IDDocumento
+	WHERE DS.IDDocumento = @IDDocumento
+		AND DS.Tipo = 1; -- 1: Scadenze previste
+
+	INSERT INTO InVoiceXML.XMLFatture.Staging_FatturaElettronicaBody_DatiPagamento_DettaglioPagamento
+	(
+		--PKStaging_FatturaElettronicaBody_DatiPagamento_DettaglioPagamento,
+		PKStaging_FatturaElettronicaBody_DatiPagamento,
+		ModalitaPagamento,
+		DataScadenzaPagamento,
+		ImportoPagamento,
+		IstitutoFinanziario,
+		IBAN,
+		ABI,
+		CAB,
+		BIC
+	)
+	SELECT
+		@PKStaging_FatturaElettronicaBody_DatiPagamento,
+		MPT.SDI_ModalitaPagamento, -- 2.4.2.2
+		CASE WHEN MPT.SDI_HasDataScadenza = CAST(1 AS BIT) THEN DS.[Data] ELSE NULL END, -- 2.4.2.5
+		DS.Importo, -- 2.4.2.6
+		CASE WHEN MPT.SDI_HasDatiIstitutoFinanziario = CAST(1 AS BIT) THEN D.Pag_Banca ELSE NULL END, -- 2.4.2.1.12
+		CASE WHEN MPT.SDI_HasDatiIstitutoFinanziario = CAST(1 AS BIT) THEN REPLACE(D.Pag_Iban, N' ', N'') ELSE NULL END, -- 2.4.2.1.13
+		CASE WHEN MPT.SDI_HasDatiIstitutoFinanziario = CAST(1 AS BIT) THEN D.Pag_Abi ELSE NULL END, -- 2.4.2.1.14
+		CASE WHEN MPT.SDI_HasDatiIstitutoFinanziario = CAST(1 AS BIT) THEN D.Pag_Cab ELSE NULL END, -- 2.4.2.1.15
+		CASE WHEN MPT.SDI_HasDatiIstitutoFinanziario = CAST(1 AS BIT) THEN D.Pag_Bic ELSE NULL END -- 2.4.2.1.16
+
+	FROM dbo.Documenti_Scadenze DS
+	INNER JOIN dbo.ModalitaPagamento_Tipi MPT ON MPT.ID = DS.IDTipoPagamento
+	INNER JOIN dbo.Documenti D ON D.ID = DS.IDDocumento
+	WHERE DS.IDDocumento = @IDDocumento
+		AND DS.Tipo = 1; -- 1: Scadenze previste
+
+END;
+GO

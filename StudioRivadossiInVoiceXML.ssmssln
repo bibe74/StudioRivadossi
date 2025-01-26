@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# SQL Server Management Studio Solution File, Format Version 18.00
+VisualStudioVersion = 15.0.28307.421
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "InVoice3", "InVoice3\InVoice3.ssmssqlproj", "{1BED1F26-4ECA-4F4B-81A2-A802CDD15E2B}"
+EndProject
+Project("{4F2E2C19-372F-40D8-9FA7-9D2138C6997A}") = "InVoiceXML", "InVoiceXML\InVoiceXML.ssmssqlproj", "{AE43F5D2-3744-4D11-A2D5-32CEE313F440}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Default|Default = Default|Default
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{205F0A9C-7D5D-4179-AADD-37F8B2027E1D}.Default|Default.ActiveCfg = Default
+		{1BED1F26-4ECA-4F4B-81A2-A802CDD15E2B}.Default|Default.ActiveCfg = Default
+		{AE43F5D2-3744-4D11-A2D5-32CEE313F440}.Default|Default.ActiveCfg = Default
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6A2F2F6E-9BA8-436E-B9FB-EB51685506C4}
+	EndGlobalSection
+EndGlobal

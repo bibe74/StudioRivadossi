@@ -1,0 +1,131 @@
+<?xml version="1.0"?>
+<SqlWorkbenchSqlProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Name="InVoiceXML">
+  <Items>
+    <LogicalFolder Name="Connections" Type="2" Sorted="true">
+      <Items>
+        <ConnectionNode Name="MIRZAKHANI\SQL2022:METRA\a.turelli">
+          <Created>2022-08-05T09:30:18.4751272+02:00</Created>
+          <Type>SQL</Type>
+          <Server>MIRZAKHANI\SQL2022</Server>
+          <UserName />
+          <Authentication>Windows Authentication</Authentication>
+          <InitialDB>InVoice3</InitialDB>
+          <LoginTimeout>30</LoginTimeout>
+          <ExecutionTimeout>0</ExecutionTimeout>
+          <ConnectionProtocol>NotSpecified</ConnectionProtocol>
+          <ApplicationName>Microsoft SQL Server Management Studio - Query</ApplicationName>
+        </ConnectionNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Queries" Type="0" Sorted="true">
+      <Items>
+        <FileNode Name="_InVoiceXML_misc.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>_InVoiceXML_misc.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_01.00_creazione_database.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_01.00_creazione_database.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_03.01_XMLCodifiche.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_03.01_XMLCodifiche.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_03.02_XMLAudit.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_03.02_XMLAudit.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_03.03_XMLFatture.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_03.03_XMLFatture.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_05.00_dbo_system_Programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_05.00_dbo_system_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_05.02_XMLAudit_system_Programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_05.02_XMLAudit_system_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_05.02_XMLAudit_user_Programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_05.02_XMLAudit_user_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_05.03_XMLFatture_system_Programmability.sql">
+          <AssociatedConnectionMoniker>8c91a03d-f9b4-46c0-a305-b5dcc79ff907:MIRZAKHANI\SQL2022:True</AssociatedConnectionMoniker>
+          <AssociatedConnSrvName>MIRZAKHANI\SQL2022</AssociatedConnSrvName>
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_05.03_XMLFatture_system_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_05.03_XMLFatture_user_Programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_05.03_XMLFatture_user_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_05.04_XMLFatture_system_Programmability.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_05.04_XMLFatture_system_Programmability.sql</FullPath>
+        </FileNode>
+        <FileNode Name="tmp_31_InVoiceXML_EsportaFattura.sql">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>tmp_31_InVoiceXML_EsportaFattura.sql</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+    <LogicalFolder Name="Miscellaneous" Type="3" Sorted="true">
+      <Items>
+        <FileNode Name="InVoiceXML_1_0_0_33.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_1_0_0_33.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_1_0_0_34.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_1_0_0_34.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_1_0_0_35.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_1_0_0_35.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_1_0_0_36.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_1_0_0_36.txt</FullPath>
+        </FileNode>
+        <FileNode Name="InVoiceXML_1_0_0_37.txt">
+          <AssociatedConnectionMoniker />
+          <AssociatedConnSrvName />
+          <AssociatedConnUserName />
+          <FullPath>InVoiceXML_1_0_0_37.txt</FullPath>
+        </FileNode>
+      </Items>
+    </LogicalFolder>
+  </Items>
+</SqlWorkbenchSqlProject>
